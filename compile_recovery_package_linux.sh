@@ -310,8 +310,8 @@ extract_firmware() {
         fsck.erofs --extract="$target_part_dir" --overwrite "$img" 2>/dev/null || true
       fi
 
-      # Verify extraction succeeded
-      if [ -d "${target_part_dir}/priv-app" ] || [ -d "${target_part_dir}/app" ] || [ -d "${target_part_dir}/framework" ] || [ -d "${target_part_dir}/bin" ]; then
+      # Verify extraction succeeded (directory must contain extracted files)
+      if [ -n "$(ls -A "$target_part_dir" 2>/dev/null)" ]; then
         extracted=1
       fi
     fi
