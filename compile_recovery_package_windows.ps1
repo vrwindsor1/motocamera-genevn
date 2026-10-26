@@ -2,6 +2,7 @@
 # Motorola Camera 4 Recovery Package Compiler (Windows PowerShell)
 # Device: Motorola Moto G Stylus 5G 2023 (codename: genevn / genevn_g)
 # Compatible ROMs: LineageOS 23.2, 24.0 (Android 17) & genevn custom ROMs
+# Tested Firmware: U1TGNS34.42-86-2-25 (Android 14)
 #
 # 100% Vibe Coded with Google DeepMind Gemini 3.8 Flash (Thinking / High)
 #
@@ -10,8 +11,8 @@
 #   with LineageOS addon.d OTA backup survival script
 #
 # Usage:
-#   Interactive:  .\compile_recovery_package.ps1
-#   CLI:          .\compile_recovery_package.ps1 -FirmwarePath "C:\path\to\stock_firmware" [-OutputDir "C:\output"]
+#   Interactive:  .\compile_recovery_package_windows.ps1
+#   CLI:          .\compile_recovery_package_windows.ps1 -FirmwarePath "C:\path\to\stock_firmware" [-OutputDir "C:\output"]
 # ==============================================================================
 
 [CmdletBinding()]
@@ -26,7 +27,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$TemplatesDir = Join-Path $ScriptDir "templates\recovery"
+$LocalTemplatesDir = Join-Path $ScriptDir "templates\recovery"
+$GitHubRawBase = "https://raw.githubusercontent.com/vrwindsor1/motocamera-genevn/main"
 
 if (-not $OutputDir) {
     $OutputDir = Join-Path $ScriptDir "output"
@@ -83,18 +85,59 @@ function Copy-BlobPattern([string]$SourcePattern, [string]$DestinationDir) {
     }
 }
 
+# Ensure open-source packaging templates are available
+function Ensure-Templates([string]$WorkDir) {
+    if ((Test-Path $LocalTemplatesDir) -and (Test-Path (Join-Path $LocalTemplatesDir "META-INF\com\google\android\update-binary"))) {
+        Log-Ok "Using local recovery templates."
+        return $LocalTemplatesDir
+    }
+
+    Log-Info "Local templates not found. Fetching open-source templates from GitHub..."
+    $downloadDir = Join-Path $WorkDir "templates\recovery"
+    New-Item -ItemType Directory -Path (Join-Path $downloadDir "META-INF\com\google\android") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $downloadDir "addon.d") -Force | Out-Null
+
+    $files = @(
+        "templates/recovery/build.prop",
+        "templates/recovery/toybox",
+        "templates/recovery/addon.d/addond_head",
+        "templates/recovery/addon.d/addond_tail",
+        "templates/recovery/META-INF/com/google/android/update-binary",
+        "templates/recovery/META-INF/com/google/android/updater-script"
+    )
+
+    foreach ($file in $files) {
+        $relDest = $file.Replace("templates/recovery/", "").Replace('/', '\')
+        $destPath = Join-Path $downloadDir $relDest
+        $parentDir = Split-Path -Parent $destPath
+        if (-not (Test-Path $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
+        
+        $url = "$GitHubRawBase/$file"
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing
+        } catch {
+            Log-Err "Failed to download required template file: $url"
+            throw $_
+        }
+    }
+
+    Log-Ok "Recovery scaffolding templates downloaded successfully."
+    return $downloadDir
+}
+
 # --- Main Flow ---
 Write-Header
-
-if (-not (Test-Path $TemplatesDir)) {
-    Log-Err "Templates directory not found: $TemplatesDir"
-    exit 1
-}
 
 # 1. Prompt for Firmware Directory if not supplied
 if (-not $FirmwarePath) {
     Write-Host "Please specify the path to your Motorola stock firmware:" -ForegroundColor White
     Write-Host "  (Can be a pre-extracted directory or your Motorola RSA / Software Fix folder)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Tip: Stock firmware can be downloaded via Motorola Software Fix (RSA) or from:" -ForegroundColor Cyan
+    Write-Host "     https://mirrors.lolinet.com/firmware/lenomola/2023/genevn/official/RETUS/" -ForegroundColor Yellow
+    Write-Host "     Note: Verified and tested on build U1TGNS34.42-86-2-25 (Android 14)." -ForegroundColor Green
+    Write-Host ""
     $FirmwarePath = Read-Host "> Path"
 }
 
@@ -127,11 +170,11 @@ if (-not $FirmwareRoot) {
     # Check if raw sparsechunks are present
     $sparseChunks = Get-ChildItem -Path $ResolvedFirmware -Filter "super.img_sparsechunk.*" -Recurse -ErrorAction SilentlyContinue
     if ($sparseChunks) {
-        Log-Warn "Detected raw super.img_sparsechunks, but partition extraction is required."
+        Log-Warn "Detected raw super.img_sparsechunks, but dynamic partition extraction is required."
         Write-Host ""
         Write-Host "On Windows, dynamic Android super partitions (sparsechunks) can be extracted via:" -ForegroundColor Yellow
         Write-Host "  1. Windows Subsystem for Linux (WSL):" -ForegroundColor White
-        Write-Host "       wsl ./compile_recovery_package.sh `"$ResolvedFirmware`"" -ForegroundColor Gray
+        Write-Host "       wsl ./compile_recovery_package_linux.sh `"$ResolvedFirmware`"" -ForegroundColor Gray
         Write-Host "  2. 7-Zip (v23+ with EROFS plugin) or lpunpack/simg2img for Windows" -ForegroundColor White
         Write-Host ""
         Log-Err "Please point this script to the extracted directory containing 'product' and 'system_ext'."
@@ -154,6 +197,9 @@ New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
 New-Item -ItemType Directory -Path $RecBuildDir -Force | Out-Null
 
 try {
+    # Ensure templates
+    $TemplatesDir = Ensure-Templates $TempWorkDir
+
     # Normalize system path (/system/system or /system)
     $sysPath = Join-Path $FirmwareRoot "system"
     if (Test-Path (Join-Path $FirmwareRoot "system\system")) {

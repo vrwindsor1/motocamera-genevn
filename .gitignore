@@ -7,6 +7,8 @@
 output/*.zip
 output/compiled/
 output/transplanted_images/
+output/releases/
+*.tar.gz
 *.raw.img
 *.img
 *.sparsechunk*

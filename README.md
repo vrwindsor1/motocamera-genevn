@@ -3,6 +3,7 @@
 [![Device](https://img.shields.io/badge/Device-Moto%20G%20Stylus%205G%202023-blue.svg)](https://www.motorola.com)
 [![Codename](https://img.shields.io/badge/Codename-genevn%20%2F%20genevn__g-green.svg)](https://wiki.lineageos.org)
 [![LineageOS](https://img.shields.io/badge/Tested%20On-LineageOS%2023.2%20%26%2024.0-orange.svg)](https://lineageos.org)
+[![Firmware](https://img.shields.io/badge/Tested%20Firmware-U1TGNS34.42--86--2--25-brightgreen.svg)](https://mirrors.lolinet.com/firmware/lenomola/2023/genevn/official/RETUS/)
 [![Vibe Coded With](https://img.shields.io/badge/⚡%20Vibe%20Coded%20With-Gemini%203.8%20Flash%20High-blueviolet?style=for-the-badge&logo=google)](https://deepmind.google/technologies/gemini/)
 [![License](https://img.shields.io/badge/License-GPLv3%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
 
@@ -15,7 +16,7 @@ An open-source compilation suite that extracts official **Motorola Camera 4**, p
 
 > [!NOTE]
 > **Legal & Distribution Compliance**:  
-> This repository contains **no proprietary binaries or copyrighted blobs**. It hosts only open-source build tooling, packaging scaffolding, and installation scripts. Users supply their own official Motorola stock firmware (downloaded directly via Motorola's Software Fix / Rescue tool).
+> This repository contains **no proprietary binaries or copyrighted blobs**. It hosts only open-source build tooling, packaging scaffolding, and installation scripts. Users supply their own official Motorola stock firmware.
 
 ---
 
@@ -68,16 +69,30 @@ flowchart TD
 
 ## Obtaining Stock Motorola Firmware
 
-1. Download Motorola's official **Rescue and Smart Assistant (RSA)** tool (also known as *Motorola Software Fix*) on Windows.
-2. Connect your Moto G Stylus 5G 2023 in fastboot mode and choose **Rescue** $\rightarrow$ **Download Firmware**.
-3. Locate the downloaded firmware directory (typically stored in `C:\ProgramData\RSA\Download\RomFiles\...` or `C:\ProgramData\LMSA\Download\RomFiles\...`).
-4. The folder contains `super.img_sparsechunk.0` through `super.img_sparsechunk.17`.
+Stock firmware for the Moto G Stylus 5G 2023 (`genevn`, model `XT2315-1`) can be downloaded using either of two methods:
+
+### Method 1: Official lolinet Firmware Mirror (Direct Web Download)
+Stock ROMs can be downloaded directly from the official lolinet firmware archive:
+* **Mirror Link**: [https://mirrors.lolinet.com/firmware/lenomola/2023/genevn/official/RETUS/](https://mirrors.lolinet.com/firmware/lenomola/2023/genevn/official/RETUS/)
+
+> [!NOTE]
+> **Tested & Verified Build**:  
+> This project has been specifically verified and tested using stock firmware build **`U1TGNS34.42-86-2-25`** (Android 14):  
+> `XT2315-1_GENEVN_RETUS_14_U1TGNS34.42-86-2-25_subsidy-DEFAULT_regulatory-DEFAULT_cid50_CFC.xml.zip`
+
+### Method 2: Motorola Rescue and Smart Assistant (Software Fix)
+1. Download Motorola's official **Rescue and Smart Assistant (RSA)** tool on Windows.
+2. Connect your device in fastboot mode and select **Rescue** $\rightarrow$ **Download Firmware**.
+3. Firmware files are saved in `C:\ProgramData\RSA\Download\RomFiles\...` or `C:\ProgramData\LMSA\Download\RomFiles\...`.
 
 ---
 
 ## Compiling the Recovery Package
 
-Dedicated compilation scripts are provided for both **Linux** and **Windows**.
+Standalone compiler scripts for both **Linux** and **Windows** are available directly in this repository and as standalone downloads from the [GitHub Releases](https://github.com/vrwindsor1/motocamera-genevn/releases) page.
+
+> [!TIP]
+> You do **not** have to clone the entire repository. You can simply download the single script file for your OS (`compile_recovery_package_linux.sh` or `compile_recovery_package_windows.bat`) from the Releases page. The scripts will automatically fetch any required open-source templates dynamically.
 
 ### Linux Compilation
 
@@ -86,19 +101,21 @@ Standard Android filesystem tools are required:
 
 | Distribution | Required Packages |
 | :--- | :--- |
-| **Ubuntu / Debian** | `sudo apt install android-sdk-libsparse-utils erofs-utils p7zip-full zip` |
-| **Fedora / RHEL** | `sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip` |
-| **Arch Linux** | `sudo pacman -S android-tools erofs-utils p7zip zip` |
+| **Ubuntu / Debian** | `sudo apt install android-sdk-libsparse-utils erofs-utils p7zip-full zip curl` |
+| **Fedora / RHEL** | `sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip curl` |
+| **Arch Linux** | `sudo pacman -S android-tools erofs-utils p7zip zip curl` |
 
 #### Running the Compiler
-Run the script interactively or pass the firmware path directly:
+Make the script executable and run it:
 
 ```bash
-# Interactive mode (prompts for path)
-./compile_recovery_package.sh
+chmod +x compile_recovery_package_linux.sh
+
+# Interactive mode (prompts for firmware path or zip)
+./compile_recovery_package_linux.sh
 
 # Non-interactive CLI mode
-./compile_recovery_package.sh /path/to/stock_firmware [output_directory]
+./compile_recovery_package_linux.sh /path/to/stock_firmware.zip [output_directory]
 ```
 
 The Linux script automatically handles recombining `super.img_sparsechunk.*`, unpacking dynamic partitions via `lpunpack`, extracting EROFS filesystems, harvesting camera components, and packaging the recovery zip.
@@ -107,19 +124,19 @@ The Linux script automatically handles recombining `super.img_sparsechunk.*`, un
 
 ### Windows Compilation
 
-On Windows, you can compile the package using either the double-clickable batch launcher or PowerShell:
+On Windows, you can compile the package using either the batch launcher or PowerShell:
 
 1. **Option A (Double Click)**:
-   Double-click `compile_recovery_package.bat`. It will launch the PowerShell builder with execution bypass and prompt you for the firmware directory.
+   Double-click `compile_recovery_package_windows.bat`. It will launch the PowerShell builder with execution bypass and prompt you for the firmware directory.
 2. **Option B (PowerShell CLI)**:
    ```powershell
-   .\compile_recovery_package.ps1 -FirmwarePath "C:\path\to\stock_firmware"
+   .\compile_recovery_package_windows.ps1 -FirmwarePath "C:\path\to\stock_firmware"
    ```
 
 > [!TIP]
 > On Windows, point the script to either:
 > - A pre-extracted firmware folder (containing `product`, `system_ext`, `system`, and `vendor`), OR
-> - Your Motorola RSA / Software Fix folder. If sparsechunks need unpacking on Windows, you can extract them via WSL (`wsl ./compile_recovery_package.sh "/mnt/c/path/to/firmware"`) or 7-Zip with EROFS support.
+> - Your Motorola RSA / Software Fix folder. If sparsechunks need unpacking on Windows, you can extract them via WSL (`wsl ./compile_recovery_package_linux.sh "/mnt/c/path/to/firmware"`) or 7-Zip with EROFS support.
 
 ---
 
@@ -163,12 +180,12 @@ On Windows, you can compile the package using either the double-clickable batch 
 ## Project Structure
 
 ```text
-├── compile_recovery_package.sh        # Linux recovery package compiler
-├── compile_recovery_package.bat       # Windows batch compiler launcher
-├── compile_recovery_package.ps1       # Windows PowerShell compiler
-├── templates/                         # Open-source packaging scaffolding
-│   └── recovery/                      # Update-binary, updater-script, addon.d, and toybox
-├── output/                            # Destination directory for compiled packages
+├── compile_recovery_package_linux.sh      # Linux recovery package compiler
+├── compile_recovery_package_windows.bat   # Windows batch compiler launcher
+├── compile_recovery_package_windows.ps1   # Windows PowerShell compiler
+├── templates/                             # Open-source packaging scaffolding
+│   └── recovery/                          # Update-binary, updater-script, addon.d, and toybox
+├── output/                                # Destination directory for compiled packages
 │   └── MotoCamera4_Genevn_Recovery_Installer.zip
 └── README.md
 ```
