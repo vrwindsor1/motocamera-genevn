@@ -3,7 +3,7 @@
 # Motorola Camera 4 Recovery Package Compiler (Linux)
 # Device: Motorola Moto G Stylus 5G 2023 (codename: genevn / genevn_g)
 # Compatible ROMs: LineageOS 23.2, 24.0 (Android 17) & genevn custom ROMs
-# Tested Firmware: U1TGNS34.42-86-2-25 (Android 14)
+# Tested Firmware: U1TGNS34.42-86-2-25 & U1TGNS34.42-86-2-38 (Android 14)
 #
 # 100% Vibe Coded with Google DeepMind Gemini 3.8 Flash (Thinking / High)
 #
@@ -22,6 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_TEMPLATES_DIR="${SCRIPT_DIR}/templates/recovery"
 DEFAULT_OUTPUT_DIR="${SCRIPT_DIR}/output"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/vrwindsor1/motocamera-genevn/main"
+
+# Global state for trap cleanup
+WORK_DIR=""
+MOUNTED_DIRS=()
 
 # Styling
 C_RESET="\033[0m"
@@ -49,15 +53,29 @@ banner() {
 }
 
 # ------------------------------------------------------------------------------
+# 0. Environment Setup (Ensure tools in PATH even under sudo)
+# ------------------------------------------------------------------------------
+setup_environment() {
+  # If executed via sudo, include the real user's ~/.local/bin and ~/.local/lib
+  if [ -n "$SUDO_USER" ]; then
+    local real_home
+    real_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+    if [ -n "$real_home" ] && [ -d "$real_home" ]; then
+      export PATH="${real_home}/.local/bin:${PATH}"
+      export LD_LIBRARY_PATH="${real_home}/.local/lib:${LD_LIBRARY_PATH}"
+    fi
+  fi
+
+  export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:${PATH}"
+  export LD_LIBRARY_PATH="${HOME}/.local/lib:${LD_LIBRARY_PATH}"
+}
+
+# ------------------------------------------------------------------------------
 # 1. Dependency Verification
 # ------------------------------------------------------------------------------
 check_dependencies() {
   log_info "Verifying host build tools..."
   local missing=()
-
-  # Check PATH and local tool paths
-  export PATH="${HOME}/.local/bin:${PATH}"
-  export LD_LIBRARY_PATH="${HOME}/.local/lib:${LD_LIBRARY_PATH}"
 
   for tool in zip simg2img lpunpack; do
     if ! command -v "$tool" &>/dev/null; then
@@ -65,8 +83,19 @@ check_dependencies() {
     fi
   done
 
-  # Check for EROFS extraction tool (fsck.erofs, erofs-extract, or 7z)
-  if ! command -v fsck.erofs &>/dev/null && ! command -v erofs-extract &>/dev/null && ! command -v 7z &>/dev/null; then
+  # Verify EROFS extraction capability:
+  # 1. fsck.erofs or erofs-extract
+  # 2. OR root permissions with native kernel erofs support
+  local erofs_capable=0
+  if command -v erofs-extract &>/dev/null; then
+    erofs_capable=1
+  elif command -v fsck.erofs &>/dev/null; then
+    erofs_capable=1
+  elif [ "$(id -u)" -eq 0 ] && modinfo erofs &>/dev/null; then
+    erofs_capable=1
+  fi
+
+  if [ "$erofs_capable" -eq 0 ]; then
     missing+=("erofs-utils (fsck.erofs)")
   fi
 
@@ -74,9 +103,9 @@ check_dependencies() {
     log_err "Missing required build tools: ${missing[*]}"
     echo ""
     echo "Please install dependencies for your distribution:"
-    echo "  Fedora / RHEL:   sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip"
-    echo "  Ubuntu / Debian: sudo apt install android-sdk-libsparse-utils erofs-utils p7zip-full zip"
-    echo "  Arch Linux:      sudo pacman -S android-tools erofs-utils p7zip zip"
+    echo "  Fedora / RHEL:   sudo dnf install android-tools erofs-utils zip curl"
+    echo "  Ubuntu / Debian: sudo apt install android-sdk-libsparse-utils erofs-utils zip curl"
+    echo "  Arch Linux:      sudo pacman -S android-tools erofs-utils zip curl"
     echo ""
     exit 1
   fi
@@ -88,16 +117,24 @@ check_dependencies() {
 # 2. Template Resolution (Local or Standalone Remote Fetch)
 # ------------------------------------------------------------------------------
 ensure_templates() {
-  local work_dir="$1"
+  local target_work_dir="$1"
 
+  # Case A: templates exist relative to script directory
   if [ -d "$LOCAL_TEMPLATES_DIR" ] && [ -f "${LOCAL_TEMPLATES_DIR}/META-INF/com/google/android/update-binary" ]; then
     TEMPLATES_DIR="$LOCAL_TEMPLATES_DIR"
     log_ok "Using local recovery templates."
     return 0
   fi
 
+  # Case B: templates exist in current working directory
+  if [ -d "./templates/recovery" ] && [ -f "./templates/recovery/META-INF/com/google/android/update-binary" ]; then
+    TEMPLATES_DIR="$(pwd)/templates/recovery"
+    log_ok "Using local recovery templates."
+    return 0
+  fi
+
   log_info "Local templates not found. Fetching open-source templates from GitHub..."
-  TEMPLATES_DIR="${work_dir}/downloaded_templates"
+  TEMPLATES_DIR="${target_work_dir}/downloaded_templates"
   mkdir -p "${TEMPLATES_DIR}/META-INF/com/google/android" "${TEMPLATES_DIR}/addon.d"
 
   local files=(
@@ -138,7 +175,7 @@ get_firmware_path() {
     echo "  (Can be a folder containing sparsechunks, partition .img files, or a .zip file)"
     echo -e "${C_CYAN}  Tip: You can obtain stock firmware via Motorola Software Fix (RSA) or from:${C_RESET}"
     echo -e "       ${C_YELLOW}https://mirrors.lolinet.com/firmware/lenomola/2023/genevn/official/RETUS/${C_RESET}"
-    echo -e "       ${C_GREEN}Note: Verified & tested on build U1TGNS34.42-86-2-25 (Android 14).${C_RESET}"
+    echo -e "       ${C_GREEN}Note: Verified on builds U1TGNS34.42-86-2-25 & U1TGNS34.42-86-2-38 (Android 14).${C_RESET}"
     echo ""
     read -e -p "> Path: " input
   fi
@@ -197,6 +234,8 @@ extract_firmware() {
     simg2img "${sparse_files[@]}" "${work_dir}/super.raw.img"
     log_ok "Unpacking dynamic partitions from super.raw.img with lpunpack..."
     lpunpack "${work_dir}/super.raw.img" "$partitions_dir"
+    # Immediately reclaim disk space from raw super image (~9.5 GB)
+    rm -f "${work_dir}/super.raw.img"
   elif [ -f "${src}/super.img" ] || [ -f "${src}/super.raw.img" ]; then
     local super_img="${src}/super.img"
     [ ! -f "$super_img" ] && super_img="${src}/super.raw.img"
@@ -212,6 +251,7 @@ extract_firmware() {
       log_info "Found sparsechunks in subdirectory. Recombining..."
       simg2img "${sub_sparse[@]}" "${work_dir}/super.raw.img"
       lpunpack "${work_dir}/super.raw.img" "$partitions_dir"
+      rm -f "${work_dir}/super.raw.img"
     else
       log_err "Could not identify recognized stock firmware files in: $src"
       log_err "Expected: super.img_sparsechunk.*, super.img, or partition images (product.img, etc.)"
@@ -238,17 +278,40 @@ extract_firmware() {
     mkdir -p "$target_part_dir"
 
     log_info "Extracting ${part} partition (${img##*/})..."
-    if command -v erofs-extract &>/dev/null; then
-      erofs-extract --extract="$target_part_dir" --overwrite "$img" >/dev/null 2>&1 || true
-    elif command -v fsck.erofs &>/dev/null; then
-      fsck.erofs --extract="$target_part_dir" --overwrite "$img" >/dev/null 2>&1 || true
-    else
-      7z x -y -o"$target_part_dir" "$img" >/dev/null 2>&1 || true
+    local extracted=0
+
+    # Strategy 1: If running as root, attempt loop mount (fastest, 0 disk space)
+    if [ "$(id -u)" -eq 0 ]; then
+      if mount -t erofs -o loop,ro "$img" "$target_part_dir" 2>/dev/null || mount -t ext4 -o loop,ro "$img" "$target_part_dir" 2>/dev/null; then
+        MOUNTED_DIRS+=("$target_part_dir")
+        extracted=1
+        log_ok "Mounted ${part} partition via kernel loop."
+      fi
+    fi
+
+    # Strategy 2: erofs-extract or fsck.erofs
+    if [ "$extracted" -eq 0 ]; then
+      if command -v erofs-extract &>/dev/null; then
+        erofs-extract --extract="$target_part_dir" --overwrite "$img" 2>/dev/null || true
+      elif command -v fsck.erofs &>/dev/null; then
+        fsck.erofs --extract="$target_part_dir" --overwrite "$img" 2>/dev/null || true
+      fi
+
+      # Verify extraction succeeded
+      if [ -d "${target_part_dir}/priv-app" ] || [ -d "${target_part_dir}/app" ] || [ -d "${target_part_dir}/framework" ] || [ -d "${target_part_dir}/bin" ]; then
+        extracted=1
+      fi
+    fi
+
+    if [ "$extracted" -eq 0 ]; then
+      log_err "Failed to extract ${part} partition (${img##*/})!"
+      log_err "Please verify that erofs-utils is installed (sudo dnf install erofs-utils / sudo apt install erofs-utils)."
+      exit 1
     fi
   done
 
   FIRMWARE_ROOT="$extracted_dir"
-  log_ok "All partitions successfully extracted to: $FIRMWARE_ROOT"
+  log_ok "All partitions successfully prepared in: $FIRMWARE_ROOT"
 }
 
 # ------------------------------------------------------------------------------
@@ -402,33 +465,57 @@ build_recovery_package() {
 }
 
 # ------------------------------------------------------------------------------
+# Cleanup handler
+# ------------------------------------------------------------------------------
+cleanup() {
+  # Unmount any loop mounts
+  if [ ${#MOUNTED_DIRS[@]} -gt 0 ]; then
+    log_info "Unmounting temporary loop mounts..."
+    for mnt in "${MOUNTED_DIRS[@]}"; do
+      umount -l "$mnt" 2>/dev/null || true
+    done
+  fi
+
+  if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+    rm -rf "$WORK_DIR" 2>/dev/null || true
+  fi
+}
+
+trap cleanup EXIT INT TERM
+
+# ------------------------------------------------------------------------------
 # Main Execution
 # ------------------------------------------------------------------------------
 main() {
   banner
+  setup_environment
   check_dependencies
 
   local cli_input="$1"
   local cli_out="$2"
 
   local out_dir="${cli_out:-$DEFAULT_OUTPUT_DIR}"
-  local work_dir="$(mktemp -d /tmp/motocamera_recovery_build_XXXXXX)"
+  mkdir -p "$out_dir"
+  local abs_out_dir="$(cd "$out_dir" && pwd)"
 
-  trap 'rm -rf "$work_dir"' EXIT
+  # Allocate working directory on real storage rather than RAM-backed /tmp
+  local base_work_dir="${abs_out_dir}/.build_tmp"
+  mkdir -p "$base_work_dir"
+  WORK_DIR="$(mktemp -d "${base_work_dir}/motocamera_build_XXXXXX" 2>/dev/null || mktemp -d /tmp/motocamera_build_XXXXXX)"
 
-  log_info "Working directory initialized: $work_dir"
-  ensure_templates "$work_dir"
+  log_info "Working directory initialized: $WORK_DIR"
+  ensure_templates "$WORK_DIR"
 
   get_firmware_path "$cli_input"
 
-  extract_firmware "$FIRMWARE_INPUT" "$work_dir"
+  extract_firmware "$FIRMWARE_INPUT" "$WORK_DIR"
 
-  local staging_dir="${work_dir}/staging"
+  local staging_dir="${WORK_DIR}/staging"
   harvest_blobs "$FIRMWARE_ROOT" "$staging_dir"
 
-  build_recovery_package "$staging_dir" "$out_dir" "$work_dir"
+  build_recovery_package "$staging_dir" "$abs_out_dir" "$WORK_DIR"
 
-  local rec_zip="${out_dir}/MotoCamera4_Genevn_Recovery_Installer.zip"
+  local rec_zip="${abs_out_dir}/MotoCamera4_Genevn_Recovery_Installer.zip"
   echo ""
   echo -e "${C_BOLD}${C_GREEN}================================================================================"
   echo "                Recovery Package Compiled Successfully!                         "
