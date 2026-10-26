@@ -67,6 +67,48 @@ flowchart TD
 
 ---
 
+## Moto Camera 4 vs. Camera 3: Shared Package Name & Architecture
+
+Users often notice that Moto Camera 4 uses the package name `com.motorola.camera3` and wonder why a standalone APK install or Play Store update fails on custom ROMs.
+
+### Why Do Camera 4 and Camera 3 Share the Same Package Name?
+Both generations identify internally as `com.motorola.camera3` (`packageName="com.motorola.camera3"`). Motorola retained this package identifier across major camera generations for:
+- **Play Store & OTA Continuity**: Seamless updates across Android OS revisions without creating orphaned user profiles or duplicate app entries.
+- **Android Intent Filters**: Preserving system-level camera launch shortcuts (e.g., Motorola double-twist gesture, lockscreen camera triggers, third-party app image intents).
+- **Settings & Permission Persistence**: Maintaining user preferences and camera permissions across system updates.
+
+### Architectural Differences: Monolithic vs. Decoupled
+
+| Feature / Requirement | Moto Camera 3 (Legacy Architecture) | Moto Camera 4 (Modern Modular Suite) |
+| :--- | :--- | :--- |
+| **Typical Target OS** | Android 9 – Android 12 | Android 13 – Android 14+ |
+| **APK Versioning** | Versions 7.x – 8.x | Version 9.x+ (e.g., `v9.1.14.42`) |
+| **System APK Name** | `MotCamera3.apk` | `MotCamera4.apk` |
+| **AI / Scene Detection** | Bundled internally within APK | Decoupled into `MotCamera3AI.apk` (`com.motorola.camera3.content.ai`) |
+| **Image Tuning Stack** | Static tuning tables in `/vendor/etc/camera/` | Decoupled provider `ImagerTuning-U.apk` (`com.motorola.imagertuning.u`) |
+| **Hardware HAL Daemon** | Relied directly on Qualcomm HAL3 | Requires HIDL service `motorola.hardware.camera.imgtuner@2.0-service` |
+| **Signature Framework** | Optional / soft dependency | **Mandatory** (`com.motorola.motosignature.jar`, required in manifest) |
+| **Desktop / Ready For** | Not supported | Integrated companion service (`MotCameraDesktop.apk`) |
+
+### Why Moto Camera 4 Cannot Be Sideloaded as a Simple Loose APK
+
+On modern devices like the Moto G Stylus 5G 2023 (`genevn`), simply downloading and installing the `MotCamera4.apk` file on a custom ROM will fail or crash immediately due to several hard dependencies:
+
+1. **Mandatory Signature Shared Library (`com.motorola.motosignature`)**:
+   `MotCamera4` declares `<uses-library android:name="com.motorola.motosignature" android:required="true"/>` in its `AndroidManifest.xml`. If `/system/framework/com.motorola.motosignature.jar` and its permission XML are missing from the OS, Android's `PackageManager` will refuse to install or start the app (`INSTALL_FAILED_MISSING_SHARED_LIBRARY`).
+2. **Decoupled AI & Tuning Content Providers**:
+   Without `MotCamera3AI` in `/product/app/` and `ImagerTuning-U` in `/system_ext/priv-app/`, the main UI cannot initialize night-vision heuristics, scene optimization, or HDR tone mapping.
+3. **ImageTuner HIDL HAL & VINTF Manifest**:
+   Motorola's post-processing engine requires `motorola.hardware.camera.imgtuner@2.0-service` running as a native daemon. The recovery package registers this service in the device VINTF manifest (`manifest_imgtuner.xml`) so the Qualcomm camera provider (`vendor.qti.camera.provider@2.7-service_64`) can bind to it.
+4. **Qualcomm AUX Camera Exposure**:
+   By default, custom AOSP ROMs only expose standard back and front cameras to non-system apps. Accessing the dedicated 8MP Macro lens, Ultra-Wide sensor, and full 50MP Ultra-Res raw stream requires setting system properties (`persist.vendor.camera.expose.aux=1` and `persist.vendor.camera.physical.num=3`) and permissions.
+5. **Core System Frameworks**:
+   The camera stack queries device cutouts, haptic feedback, and camera profiles via `moto-core_services.jar` and `moto-settings.jar`.
+
+This compilation suite packages all of these interdependent components together so that Motorola Camera 4 functions completely with full hardware sensor access on LineageOS.
+
+---
+
 ## Obtaining Stock Motorola Firmware
 
 Stock firmware for the Moto G Stylus 5G 2023 (`genevn`, model `XT2315-1`) can be downloaded using either of two methods:
