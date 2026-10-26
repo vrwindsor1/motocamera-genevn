@@ -13,7 +13,7 @@
 #
 # Usage:
 #   Interactive:  ./compile_recovery_package_linux.sh
-#   CLI:          ./compile_recovery_package_linux.sh /path/to/stock_firmware [output_dir]
+#   CLI:          ./compile_recovery_package_linux.sh "/path/to/stock_firmware" [output_dir]
 # ==============================================================================
 
 set -eo pipefail
@@ -180,12 +180,17 @@ get_firmware_path() {
     read -e -p "> Path: " input
   fi
 
-  # Expand tilde and trim whitespace/quotes
+  # Trim leading and trailing whitespace
+  input="$(echo "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  # Strip quotes safely (handles single or double quotes)
+  while [[ "$input" =~ ^[\'\"](.*)[\'\"]$ ]]; do
+    input="${BASH_REMATCH[1]}"
+    input="$(echo "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  done
+
+  # Expand tilde
   input="${input/#\~/$HOME}"
-  input="${input%\"}"
-  input="${input#\"}"
-  input="${input%\'}"
-  input="${input#\'}"
 
   if [ ! -e "$input" ]; then
     log_err "Specified path does not exist: $input"
@@ -227,8 +232,12 @@ extract_firmware() {
     src="$unzipped_dir"
   fi
 
-  # Case C: Check for sparsechunks or partition images
-  local sparse_files=( $(ls "${src}"/super.img_sparsechunk.* 2>/dev/null | sort -V || true) )
+  # Case C: Check for sparsechunks safely (spaces and special characters preserved)
+  local sparse_files=()
+  while IFS= read -r -d $'\0' f; do
+    [ -n "$f" ] && sparse_files+=("$f")
+  done < <(find "$src" -maxdepth 1 -name "super.img_sparsechunk.*" -print0 2>/dev/null | sort -z -V)
+
   if [ ${#sparse_files[@]} -gt 0 ]; then
     log_info "Recombining ${#sparse_files[@]} super sparsechunk segments with simg2img..."
     simg2img "${sparse_files[@]}" "${work_dir}/super.raw.img"
@@ -246,9 +255,13 @@ extract_firmware() {
     partitions_dir="$src"
   else
     # Check one subdirectory deep (common for extracted RSA / LMSA zips)
-    local sub_sparse=( $(ls "${src}"/*/super.img_sparsechunk.* 2>/dev/null | sort -V || true) )
+    local sub_sparse=()
+    while IFS= read -r -d $'\0' f; do
+      [ -n "$f" ] && sub_sparse+=("$f")
+    done < <(find "$src" -mindepth 2 -maxdepth 2 -name "super.img_sparsechunk.*" -print0 2>/dev/null | sort -z -V)
+
     if [ ${#sub_sparse[@]} -gt 0 ]; then
-      log_info "Found sparsechunks in subdirectory. Recombining..."
+      log_info "Found ${#sub_sparse[@]} sparsechunks in subdirectory. Recombining..."
       simg2img "${sub_sparse[@]}" "${work_dir}/super.raw.img"
       lpunpack "${work_dir}/super.raw.img" "$partitions_dir"
       rm -f "${work_dir}/super.raw.img"
