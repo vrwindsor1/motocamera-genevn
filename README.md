@@ -1,12 +1,19 @@
-# Motorola Camera 4 Suite Compiler for Moto G Stylus 5G 2023 (`genevn`)
+# Motorola Camera 4 Suite for Moto G Stylus 5G 2023 (`genevn`)
 
 [![Device](https://img.shields.io/badge/Device-Moto%20G%20Stylus%205G%202023-blue.svg)](https://www.motorola.com)
 [![Codename](https://img.shields.io/badge/Codename-genevn%20%2F%20genevn__g-green.svg)](https://wiki.lineageos.org)
 [![LineageOS](https://img.shields.io/badge/Tested%20On-LineageOS%2023.2%20%26%2024.0-orange.svg)](https://lineageos.org)
+[![Vibe Coded With](https://img.shields.io/badge/⚡%20Vibe%20Coded%20With-Gemini%203.8%20Flash%20High-blueviolet?style=for-the-badge&logo=google)](https://deepmind.google/technologies/gemini/)
 [![License](https://img.shields.io/badge/License-GPLv3%20%2F%20Apache--2.0-yellow.svg)](LICENSE)
 
-An open-source, clean-room compilation suite that extracts official **Motorola Camera 4**, proprietary camera HAL services, and multi-camera configuration blobs from official Motorola stock firmware and packages them into clean, flashable modules for **LineageOS** and custom AOSP-based ROMs.
+> [!IMPORTANT]
+> ### ⚡ 100% Vibe Coded with Google DeepMind Gemini 3.8 Flash (High)
+> **This entire project was vibe coded end-to-end with Google DeepMind Gemini 3.8 Flash (High / Thinking)**.  
+> From dynamic partition extraction pipelines (`simg2img`, `lpunpack`, `erofs`), reverse-engineering Motorola multi-camera HAL bindings and SELinux file-context permissions down to the recovery installer update-binary and `addon.d` OTA survival engine, every line of build tooling, configuration, and documentation was developed collaboratively with Gemini 3.8 Flash High.
 
+An open-source compilation suite that extracts official **Motorola Camera 4**, proprietary camera HAL services, and multi-camera configuration blobs from official Motorola stock firmware and packages them into a clean, flashable recovery package for **LineageOS** and custom AOSP-based ROMs.
+
+> [!NOTE]
 > **Legal & Distribution Compliance**:  
 > This repository contains **no proprietary binaries or copyrighted blobs**. It hosts only open-source build tooling, packaging scaffolding, and installation scripts. Users supply their own official Motorola stock firmware (downloaded directly via Motorola's Software Fix / Rescue tool).
 
@@ -14,7 +21,7 @@ An open-source, clean-room compilation suite that extracts official **Motorola C
 
 ## Hardware Camera Capabilities Restored
 
-Decompiled from Motorola's device camera descriptors (`assets/config_devices_genevn` and `assets/app_feature_genevn` inside `MotCamera4.apk`):
+Decompiled and mapped from Motorola's device camera descriptors (`assets/config_devices_genevn` and `assets/app_feature_genevn` inside `MotCamera4.apk`):
 
 ```mermaid
 flowchart TD
@@ -59,65 +66,64 @@ flowchart TD
 
 ---
 
-## System Requirements
-
-The build script runs on Linux and requires standard Android filesystem tools:
-
-| Tool | Ubuntu / Debian | Fedora / RHEL | Arch Linux |
-| :--- | :--- | :--- | :--- |
-| **`zip`** | `sudo apt install zip` | `sudo dnf install zip` | `sudo pacman -S zip` |
-| **`simg2img`** | `sudo apt install android-sdk-libsparse-utils` | `sudo dnf install android-tools` | `sudo pacman -S android-tools` |
-| **`lpunpack`** | `sudo apt install android-sdk-libsparse-utils` | `sudo dnf install android-tools` | `sudo pacman -S android-tools` |
-| **`fsck.erofs`** | `sudo apt install erofs-utils` | `sudo dnf install erofs-utils` | `sudo pacman -S erofs-utils` |
-
----
-
 ## Obtaining Stock Motorola Firmware
 
-1. Download Motorola's official **Rescue and Smart Assistant (RSA)** tool (also known as *Motorola Software Fix*) for Windows.
+1. Download Motorola's official **Rescue and Smart Assistant (RSA)** tool (also known as *Motorola Software Fix*) on Windows.
 2. Connect your Moto G Stylus 5G 2023 in fastboot mode and choose **Rescue** $\rightarrow$ **Download Firmware**.
-3. Locate the downloaded firmware directory (typically stored in `C:\ProgramData\RSA\Download\RomFiles\...`).
-4. Copy the firmware folder to your Linux workstation. The folder contains `super.img_sparsechunk.0` through `super.img_sparsechunk.17`.
+3. Locate the downloaded firmware directory (typically stored in `C:\ProgramData\RSA\Download\RomFiles\...` or `C:\ProgramData\LMSA\Download\RomFiles\...`).
+4. The folder contains `super.img_sparsechunk.0` through `super.img_sparsechunk.17`.
 
 ---
 
-## Compiling the Modules
+## Compiling the Recovery Package
 
-### Option 1: Interactive Mode
-Simply run the compiler without arguments. It will prompt you to provide the firmware directory:
+Dedicated compilation scripts are provided for both **Linux** and **Windows**.
+
+### Linux Compilation
+
+#### System Requirements
+Standard Android filesystem tools are required:
+
+| Distribution | Required Packages |
+| :--- | :--- |
+| **Ubuntu / Debian** | `sudo apt install android-sdk-libsparse-utils erofs-utils p7zip-full zip` |
+| **Fedora / RHEL** | `sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip` |
+| **Arch Linux** | `sudo pacman -S android-tools erofs-utils p7zip zip` |
+
+#### Running the Compiler
+Run the script interactively or pass the firmware path directly:
+
 ```bash
-./compile_motocamera_package.sh
-```
-```text
-================================================================================
-        Motorola Camera 4 & Multi-Camera Suite Package Compiler                 
-               Moto G Stylus 5G 2023 (genevn) for LineageOS                     
-================================================================================
+# Interactive mode (prompts for path)
+./compile_recovery_package.sh
 
-[INFO] Verifying host build tools...
-[OK] All required build tools are installed.
-
-Please specify the path to your downloaded Motorola stock firmware:
-  (Can be a folder containing sparsechunks, partition .img files, or a .zip file)
-> Path: /path/to/stock/firmware
+# Non-interactive CLI mode
+./compile_recovery_package.sh /path/to/stock_firmware [output_directory]
 ```
 
-### Option 2: CLI / Non-Interactive Mode
-Pass the firmware path as the first argument, and optionally a custom output directory as the second argument:
-```bash
-./compile_motocamera_package.sh /path/to/stock/firmware [output_directory]
-```
-
-The script automatically:
-1. Recombines `super.img_sparsechunk.*` into `super.raw.img` using `simg2img`.
-2. Unpacks dynamic logical partitions (`product`, `system_ext`, `system`, `vendor`) via `lpunpack`.
-3. Extracts partition filesystems via `fsck.erofs`.
-4. Extracts only the required Motorola camera applications, companion AI services, framework signature JARs, VINTF manifests, and vendor HAL binaries.
-5. Assembles both the **Recovery Installer Zip** and **Systemless Magisk / KernelSU Module**.
+The Linux script automatically handles recombining `super.img_sparsechunk.*`, unpacking dynamic partitions via `lpunpack`, extracting EROFS filesystems, harvesting camera components, and packaging the recovery zip.
 
 ---
 
-## Installation Methods
+### Windows Compilation
+
+On Windows, you can compile the package using either the double-clickable batch launcher or PowerShell:
+
+1. **Option A (Double Click)**:
+   Double-click `compile_recovery_package.bat`. It will launch the PowerShell builder with execution bypass and prompt you for the firmware directory.
+2. **Option B (PowerShell CLI)**:
+   ```powershell
+   .\compile_recovery_package.ps1 -FirmwarePath "C:\path\to\stock_firmware"
+   ```
+
+> [!TIP]
+> On Windows, point the script to either:
+> - A pre-extracted firmware folder (containing `product`, `system_ext`, `system`, and `vendor`), OR
+> - Your Motorola RSA / Software Fix folder. If sparsechunks need unpacking on Windows, you can extract them via WSL (`wsl ./compile_recovery_package.sh "/mnt/c/path/to/firmware"`) or 7-Zip with EROFS support.
+
+---
+
+## Installation via Recovery
 
 > [!TIP]
 > **Install Anytime — No First-Boot Requirement**:  
@@ -125,43 +131,45 @@ The script automatically:
 
 > [!NOTE]
 > **OTA Survival vs. Major Android Revision Sideloads**:
-> * **Standard Nightly / Minor OTA Updates**: **Survives automatically**. The included `/system/addon.d/30-motocamera.sh` backup script backs up and restores all camera binaries, framework JARs, companion services, and permissions during LineageOS OTA updates.
-> * **Major Android Revision Sideload Updates**: When sideloading a whole new major Android release (e.g., jumping between major LineageOS versions like 23.x to 24.x), the recovery completely rewrites the system partitions and does not execute `addon.d` across major version bumps. Simply re-flash the recovery installer package (or re-run the live installer script) after completing the major OS upgrade.
+> * **Standard Nightly / Minor OTA Updates**: **Survives automatically**. The included `/system/addon.d/30-motocamera.sh` script automatically backs up and restores all camera binaries, framework JARs, companion services, and permissions during LineageOS OTA updates.
+> * **Major Android Revision Sideload Updates**: When sideloading a whole new major Android release (e.g., jumping between major LineageOS versions like 23.x to 24.x), recovery completely rewrites the system partitions and does not execute `addon.d` across major version bumps. Simply re-sideload the recovery installer package after completing the major OS upgrade.
 
-### Method 1: Recovery Sideload (Lineage Recovery / TWRP)
-1. Reboot phone to Recovery.
-2. In recovery, select **Apply Update** $\rightarrow$ **Apply from ADB**.
-3. On your computer, run:
+### Installation Steps
+
+1. Reboot your phone into **Recovery** (Lineage Recovery, TWRP, or OrangeFox).
+2. Select **Apply Update** $\rightarrow$ **Apply from ADB**.
+3. On your computer terminal, sideload the compiled package:
    ```bash
-   adb sideload output/compiled/MotoCamera4_Genevn_Recovery_Installer.zip
+   adb sideload output/MotoCamera4_Genevn_Recovery_Installer.zip
    ```
-4. If recovery displays *"Signature verification failed. Install anyway?"*, select **Yes** (standard for third-party zips).
-5. Reboot to system. The `addon.d/30-motocamera.sh` script will automatically restore the camera suite during future LineageOS OTA updates.
+4. If recovery prompts with:
+   > *"Signature verification failed. Install anyway?"*  
+   Select **Yes** (standard for custom packages).
+5. Once installation finishes, select **Reboot system now**.
+6. Open **Moto Camera** from your app drawer. All hardware sensors and shooting modes are active!
 
-### Method 2: Systemless KernelSU / Magisk Module
-1. Transfer `output/compiled/MotoCamera4_Genevn_Magisk_KernelSU_Module.zip` to your phone storage.
-2. Open the **KernelSU** or **Magisk** app $\rightarrow$ **Modules** tab $\rightarrow$ **Install from storage**.
-3. Select the zip file and reboot your device.
+---
 
-### Method 3: 1-Click Live Installer (via ADB Root)
-If your phone is booted into LineageOS with ADB root enabled in Developer Options:
-```bash
-./output/install_motocamera_live.sh
-```
-This mounts native Android OverlayFS and installs all camera components directly without modifying physical partition blocks.
+## Device & ROM Compatibility
+
+- **Primary Device**: Motorola Moto G Stylus 5G 2023 (codename: `genevn`, `genevn_g`, model `XT2315-1`).
+- **Verified ROMs**:
+  - **LineageOS 23.2**
+  - **LineageOS 24.0 (Android 17 Preview, SDK 37)**
+- **Other Custom ROMs**: Compatible with other custom ROMs for `genevn` based on LineageOS (e.g., crDroid, Evolution X, RisingOS) that share the `genevn` device tree, Qualcomm SM6450 HALs, and standard dynamic partition layouts.
 
 ---
 
 ## Project Structure
 
 ```text
-├── compile_motocamera_package.sh      # Main compilation tool (handles unpacking & packaging)
-├── templates/                         # Open-source module scaffolding and scripts
-│   ├── recovery/                      # Update-binary, addon.d scripts, and toybox
-│   └── magisk/                        # Magisk/KernelSU customize.sh, system.prop, sepolicy
-├── output/                            # Output directory for compiled packages
-│   ├── install_motocamera_live.sh     # 1-click live ADB environment installer
-│   └── compiled/                      # Generated flashable zips
+├── compile_recovery_package.sh        # Linux recovery package compiler
+├── compile_recovery_package.bat       # Windows batch compiler launcher
+├── compile_recovery_package.ps1       # Windows PowerShell compiler
+├── templates/                         # Open-source packaging scaffolding
+│   └── recovery/                      # Update-binary, updater-script, addon.d, and toybox
+├── output/                            # Destination directory for compiled packages
+│   └── MotoCamera4_Genevn_Recovery_Installer.zip
 └── README.md
 ```
 
@@ -169,11 +177,8 @@ This mounts native Android OverlayFS and installs all camera components directly
 
 ## Verification & Testing
 
-Tested and verified on **Moto G Stylus 5G 2023 (`XT2315-1`, `genevn`)** on both:
-- **LineageOS 23.2**
-- **LineageOS 24.0 (Android 17 Preview, SDK 37)**
+Tested and verified on physical hardware (**Moto G Stylus 5G 2023 `XT2315-1`** running **LineageOS 24.0 / Android 17**):
 
-### Verified Features:
 - [x] Official Motorola Camera 4 UI (`com.motorola.camera3` v9.1.14.42)
 - [x] Rear 50MP Main sensor (binned 12.5MP and full 50MP Ultra-Res)
 - [x] Front 16MP Selfie camera
@@ -182,4 +187,5 @@ Tested and verified on **Moto G Stylus 5G 2023 (`XT2315-1`, `genevn`)** on both:
 - [x] Pro manual controls & RAW DNG capture (`.dng` output)
 - [x] Auto Night Vision & Scene Detection AI (`MotCamera3AI`)
 - [x] Ready For / Webcam Desktop streaming (`MotCameraDesktop`)
+- [x] LineageOS `addon.d` OTA survival
 - [x] Clean boot with SELinux Enforcing

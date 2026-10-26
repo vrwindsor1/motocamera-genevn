@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Motorola Camera 4 & Multi-Camera HAL Suite Compiler
+# Motorola Camera 4 Recovery Package Compiler (Linux)
 # Device: Motorola Moto G Stylus 5G 2023 (codename: genevn / genevn_g)
-# Compatible ROMs: LineageOS 24.0 (Android 17) and custom AOSP-based ROMs
+# Compatible ROMs: LineageOS 23.2, 24.0 (Android 17) & genevn custom ROMs
+#
+# 100% Vibe Coded with Google DeepMind Gemini 3.8 Flash (Thinking / High)
 #
 # Generates:
-#   1. Recovery Flashable Zip (Lineage Recovery / TWRP / OrangeFox) with addon.d OTA survival
-#   2. Systemless Magisk / KernelSU Module
+#   MotoCamera4_Genevn_Recovery_Installer.zip (Lineage Recovery / TWRP sideload)
+#   with LineageOS addon.d OTA backup survival script
 #
 # Usage:
-#   Interactive:  ./compile_motocamera_package.sh
-#   CLI:          ./compile_motocamera_package.sh /path/to/stock_firmware [output_dir]
+#   Interactive:  ./compile_recovery_package.sh
+#   CLI:          ./compile_recovery_package.sh /path/to/stock_firmware [output_dir]
 # ==============================================================================
 
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATES_DIR="${SCRIPT_DIR}/templates"
-DEFAULT_OUTPUT_DIR="${SCRIPT_DIR}/output/compiled"
+TEMPLATES_DIR="${SCRIPT_DIR}/templates/recovery"
+DEFAULT_OUTPUT_DIR="${SCRIPT_DIR}/output"
 
 # Styling
 C_RESET="\033[0m"
@@ -26,6 +28,7 @@ C_GREEN="\033[32m"
 C_CYAN="\033[36m"
 C_YELLOW="\033[33m"
 C_RED="\033[31m"
+C_PURPLE="\033[35m"
 
 log_info() { echo -e "${C_CYAN}[INFO]${C_RESET} $1"; }
 log_ok()   { echo -e "${C_GREEN}[OK]${C_RESET} $1"; }
@@ -35,10 +38,12 @@ log_err()  { echo -e "${C_RED}[ERROR]${C_RESET} $1"; }
 banner() {
   echo -e "${C_BOLD}${C_CYAN}"
   echo "================================================================================"
-  echo "        Motorola Camera 4 & Multi-Camera Suite Package Compiler                 "
-  echo "               Moto G Stylus 5G 2023 (genevn) for LineageOS                     "
+  echo "   Motorola Camera 4 Recovery Package Compiler for Moto G Stylus 5G 2023        "
+  echo "                     Device: genevn / genevn_g (LineageOS)                      "
   echo "================================================================================"
-  echo -e "${C_RESET}"
+  echo -e "${C_PURPLE}   ⚡ 100% Vibe Coded with Google DeepMind Gemini 3.8 Flash (Thinking / High)  ${C_RESET}"
+  echo -e "${C_BOLD}${C_CYAN}================================================================================${C_RESET}"
+  echo ""
 }
 
 # ------------------------------------------------------------------------------
@@ -58,8 +63,8 @@ check_dependencies() {
     fi
   done
 
-  # Check for EROFS extraction tool (erofs-extract, fsck.erofs, or 7z)
-  if ! command -v erofs-extract &>/dev/null && ! command -v fsck.erofs &>/dev/null && ! command -v 7z &>/dev/null; then
+  # Check for EROFS extraction tool (fsck.erofs, erofs-extract, or 7z)
+  if ! command -v fsck.erofs &>/dev/null && ! command -v erofs-extract &>/dev/null && ! command -v 7z &>/dev/null; then
     missing+=("erofs-utils (fsck.erofs)")
   fi
 
@@ -67,13 +72,19 @@ check_dependencies() {
     log_err "Missing required build tools: ${missing[*]}"
     echo ""
     echo "Please install dependencies for your distribution:"
-    echo "  Fedora / RHEL:  sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip"
+    echo "  Fedora / RHEL:   sudo dnf install android-tools erofs-utils p7zip p7zip-plugins zip"
     echo "  Ubuntu / Debian: sudo apt install android-sdk-libsparse-utils erofs-utils p7zip-full zip"
-    echo "  Arch Linux:     sudo pacman -S android-tools erofs-utils p7zip zip"
+    echo "  Arch Linux:      sudo pacman -S android-tools erofs-utils p7zip zip"
     echo ""
     exit 1
   fi
-  log_ok "All required build tools are installed."
+
+  if [ ! -d "$TEMPLATES_DIR" ]; then
+    log_err "Recovery templates directory not found: $TEMPLATES_DIR"
+    exit 1
+  fi
+
+  log_ok "All required build tools and templates verified."
 }
 
 # ------------------------------------------------------------------------------
@@ -83,7 +94,6 @@ get_firmware_path() {
   local input="$1"
 
   if [ -z "$input" ]; then
-    echo ""
     echo -e "${C_BOLD}Please specify the path to your downloaded Motorola stock firmware:${C_RESET}"
     echo "  (Can be a folder containing sparsechunks, partition .img files, or a .zip file)"
     read -e -p "> Path: " input
@@ -123,7 +133,7 @@ extract_firmware() {
     return 0
   fi
 
-  # Case B: If input is a zip archive, extract it first
+  # Case B: If input is an archive, extract it first
   if [ -f "$src" ] && [[ "$src" =~ \.(zip|tar\.gz|tgz)$ ]]; then
     log_info "Unpacking firmware archive..."
     local unzipped_dir="${work_dir}/unpacked_zip"
@@ -136,27 +146,23 @@ extract_firmware() {
     src="$unzipped_dir"
   fi
 
-  # Case C: Sparsechunk super partition
-  local sparsechunks=( $(ls "${src}"/super.img_sparsechunk.* 2>/dev/null | sort -V || true) )
-  if [ ${#sparsechunks[@]} -gt 0 ]; then
-    log_info "Found ${#sparsechunks[@]} super sparsechunk files. Recombining..."
-    simg2img "${sparsechunks[@]}" "${work_dir}/super.raw.img"
-    log_ok "Combined super.raw.img created."
-
-    log_info "Unpacking dynamic partitions from super.raw.img..."
+  # Case C: Check for sparsechunks or partition images
+  local sparse_files=( $(ls "${src}"/super.img_sparsechunk.* 2>/dev/null | sort -V || true) )
+  if [ ${#sparse_files[@]} -gt 0 ]; then
+    log_info "Recombining ${#sparse_files[@]} super sparsechunk segments with simg2img..."
+    simg2img "${sparse_files[@]}" "${work_dir}/super.raw.img"
+    log_ok "Unpacking dynamic partitions from super.raw.img with lpunpack..."
     lpunpack "${work_dir}/super.raw.img" "$partitions_dir"
-    log_ok "Dynamic partitions unpacked into: $partitions_dir"
   elif [ -f "${src}/super.img" ] || [ -f "${src}/super.raw.img" ]; then
     local super_img="${src}/super.img"
     [ ! -f "$super_img" ] && super_img="${src}/super.raw.img"
     log_info "Found super partition image: $super_img"
     lpunpack "$super_img" "$partitions_dir"
-    log_ok "Dynamic partitions unpacked into: $partitions_dir"
   elif [ -f "${src}/product.img" ] || [ -f "${src}/product_a.img" ]; then
     log_info "Found existing partition images in directory."
     partitions_dir="$src"
   else
-    # Check one subdirectory deep (common for extracted zips)
+    # Check one subdirectory deep (common for extracted RSA / LMSA zips)
     local sub_sparse=( $(ls "${src}"/*/super.img_sparsechunk.* 2>/dev/null | sort -V || true) )
     if [ ${#sub_sparse[@]} -gt 0 ]; then
       log_info "Found sparsechunks in subdirectory. Recombining..."
@@ -202,7 +208,7 @@ extract_firmware() {
 }
 
 # ------------------------------------------------------------------------------
-# 4. Blob Harvester
+# 4. Proprietary Component Harvester
 # ------------------------------------------------------------------------------
 harvest_blobs() {
   local src_root="$1"
@@ -217,7 +223,7 @@ harvest_blobs() {
   [ -d "${src_root}/system/system" ] && sys_path="${src_root}/system/system"
 
   # 1. Product Partition Files
-  log_info "  - Copying Product apps and configurations..."
+  log_info "  - Harvesting Product camera applications & permissions..."
   mkdir -p "${staging_dir}/system/product/priv-app/MotCamera4"
   mkdir -p "${staging_dir}/system/product/app/MotCamera3AI"
   mkdir -p "${staging_dir}/system/product/etc/permissions"
@@ -233,7 +239,7 @@ harvest_blobs() {
   [ -d "${src_root}/product/etc/MotoDesktopAppConfig" ] && cp -rf "${src_root}/product/etc/MotoDesktopAppConfig/"* "${staging_dir}/system/product/etc/MotoDesktopAppConfig/" || true
 
   # 2. System_ext Partition Files
-  log_info "  - Copying System_ext ImagerTuning, Desktop, frameworks, and libs..."
+  log_info "  - Harvesting System_ext ImagerTuning, Desktop, frameworks, and libs..."
   mkdir -p "${staging_dir}/system/system_ext/priv-app/ImagerTuning-U"
   mkdir -p "${staging_dir}/system/system_ext/priv-app/MotCameraDesktop"
   mkdir -p "${staging_dir}/system/system_ext/framework"
@@ -260,7 +266,7 @@ harvest_blobs() {
   done
 
   # 3. System Framework and Libraries
-  log_info "  - Copying System framework signature libraries..."
+  log_info "  - Harvesting System framework signature libraries..."
   mkdir -p "${staging_dir}/system/framework"
   mkdir -p "${staging_dir}/system/etc/permissions"
   mkdir -p "${staging_dir}/system/lib64"
@@ -274,7 +280,7 @@ harvest_blobs() {
   cp -f "${sys_path}/lib64/motorola.hardware.camera.imgtuner@1.0.so" "${staging_dir}/system/lib64/" 2>/dev/null || true
 
   # 4. Vendor Camera HAL & VINTF Manifest
-  log_info "  - Copying Vendor ImageTuner HAL and VINTF manifests..."
+  log_info "  - Harvesting Vendor ImageTuner HAL and VINTF manifests..."
   mkdir -p "${staging_dir}/system/vendor/bin/hw"
   mkdir -p "${staging_dir}/system/vendor/etc/init"
   mkdir -p "${staging_dir}/system/vendor/etc/vintf/manifest"
@@ -318,9 +324,9 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# 5. Package Compilation
+# 5. Recovery Package Assembly
 # ------------------------------------------------------------------------------
-build_packages() {
+build_recovery_package() {
   local staging_dir="$1"
   local output_dir="$2"
   local build_tmp="$3"
@@ -328,16 +334,17 @@ build_packages() {
   mkdir -p "$output_dir"
   local abs_output_dir="$(cd "$output_dir" && pwd)"
 
-  # --- Build 1: Recovery Flashable Installer ---
-  log_info "Compiling Recovery Flashable Installer..."
+  log_info "Assembling Recovery Flashable Installer..."
   local rec_build="${build_tmp}/recovery_build"
   rm -rf "$rec_build"
   mkdir -p "$rec_build"
 
   # Copy templates
-  cp -rf "${TEMPLATES_DIR}/recovery/"* "$rec_build/"
+  cp -rf "${TEMPLATES_DIR}/"* "$rec_build/"
+  # Ensure addon.d templates are inside system/addon.d
   mkdir -p "${rec_build}/system/addon.d"
-  cp -rf "${TEMPLATES_DIR}/recovery/addon.d/"* "${rec_build}/system/addon.d/"
+  cp -rf "${TEMPLATES_DIR}/addon.d/"* "${rec_build}/system/addon.d/"
+  rm -rf "${rec_build}/addon.d"
 
   # Copy harvested system tree
   cp -rf "${staging_dir}/system/"* "${rec_build}/system/"
@@ -346,30 +353,12 @@ build_packages() {
   local rec_zip="${abs_output_dir}/MotoCamera4_Genevn_Recovery_Installer.zip"
   rm -f "$rec_zip"
   (cd "$rec_build" && zip -r9q "$rec_zip" .)
+
   log_ok "Recovery Installer created: $rec_zip ($(du -h "$rec_zip" | cut -f1))"
-
-  # --- Build 2: Systemless Magisk / KernelSU Module ---
-  log_info "Compiling Systemless Magisk / KernelSU Module..."
-  local mag_build="${build_tmp}/magisk_build"
-  rm -rf "$mag_build"
-  mkdir -p "$mag_build"
-
-  # Copy templates
-  cp -rf "${TEMPLATES_DIR}/magisk/"* "$mag_build/"
-
-  # Copy harvested system tree into module
-  mkdir -p "${mag_build}/system"
-  cp -rf "${staging_dir}/system/"* "${mag_build}/system/"
-
-  # Package zip
-  local mag_zip="${abs_output_dir}/MotoCamera4_Genevn_Magisk_KernelSU_Module.zip"
-  rm -f "$mag_zip"
-  (cd "$mag_build" && zip -r9q "$mag_zip" .)
-  log_ok "Magisk/KernelSU Module created: $mag_zip ($(du -h "$mag_zip" | cut -f1))"
 }
 
 # ------------------------------------------------------------------------------
-# Main Flow
+# Main Execution
 # ------------------------------------------------------------------------------
 main() {
   banner
@@ -381,7 +370,7 @@ main() {
   get_firmware_path "$cli_input"
 
   local out_dir="${cli_out:-$DEFAULT_OUTPUT_DIR}"
-  local work_dir="$(mktemp -d /tmp/motocamera_build_XXXXXX)"
+  local work_dir="$(mktemp -d /tmp/motocamera_recovery_build_XXXXXX)"
 
   trap 'rm -rf "$work_dir"' EXIT
 
@@ -391,21 +380,27 @@ main() {
   local staging_dir="${work_dir}/staging"
   harvest_blobs "$FIRMWARE_ROOT" "$staging_dir"
 
-  build_packages "$staging_dir" "$out_dir" "$work_dir"
+  build_recovery_package "$staging_dir" "$out_dir" "$work_dir"
 
+  local rec_zip="${out_dir}/MotoCamera4_Genevn_Recovery_Installer.zip"
   echo ""
   echo -e "${C_BOLD}${C_GREEN}================================================================================"
-  echo "                     Compilation Completed Successfully!                        "
+  echo "                Recovery Package Compiled Successfully!                         "
   echo -e "================================================================================${C_RESET}"
   echo ""
-  echo "Output files ready for distribution:"
-  echo "  1. Recovery Zip:   ${out_dir}/MotoCamera4_Genevn_Recovery_Installer.zip"
-  echo "  2. Magisk Module:  ${out_dir}/MotoCamera4_Genevn_Magisk_KernelSU_Module.zip"
+  echo "Installer Package:"
+  echo "  --> ${rec_zip}"
   echo ""
-  echo "Installation Instructions:"
-  echo "  - Recovery: In Lineage Recovery, select 'Apply Update' -> 'Apply from ADB',"
-  echo "    then run: adb sideload \"${out_dir}/MotoCamera4_Genevn_Recovery_Installer.zip\""
-  echo "  - Magisk/KernelSU: Install via KernelSU / Magisk app Modules tab and reboot."
+  echo "How to install via Lineage Recovery:"
+  echo "  1. Reboot your phone into Recovery mode."
+  echo "  2. Select 'Apply Update' -> 'Apply from ADB'."
+  echo "  3. Run the following command from your PC:"
+  echo "       adb sideload \"${rec_zip}\""
+  echo "  4. If prompted with 'Signature verification failed. Install anyway?', select 'Yes'."
+  echo "  5. Reboot to system. The camera is ready to use!"
+  echo ""
+  echo -e "${C_CYAN}[OTA Survival]${C_RESET} The included addon.d script will automatically"
+  echo "preserve the camera suite across nightly LineageOS updates."
   echo ""
 }
 
