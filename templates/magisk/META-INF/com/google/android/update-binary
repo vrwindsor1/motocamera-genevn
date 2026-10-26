@@ -1,0 +1,31 @@
+#!/sbin/sh
+
+#################
+# Magisk/KernelSU Module Package
+#################
+
+OUTFD=$2
+ZIPFILE=$3
+
+mount /data 2>/dev/null
+NVBASE=/data/adb
+
+if [ -f $NVBASE/magisk/util_functions.sh ]; then
+  . $NVBASE/magisk/util_functions.sh
+elif [ -f $NVBASE/ksu/bin/util_functions.sh ]; then
+  . $NVBASE/ksu/bin/util_functions.sh
+elif [ -f $NVBASE/ksu/util_functions.sh ]; then
+  . $NVBASE/ksu/util_functions.sh
+elif [ -f $NVBASE/ap/util_functions.sh ]; then
+  . $NVBASE/ap/util_functions.sh
+fi
+
+if [ -z "$MAGISK_VER" ] && [ -z "$KSU_VER" ] && [ -z "$APATCH_VER" ]; then
+  # Direct recovery or fallback
+  echo "ui_print ************************************************" > "/proc/self/fd/$OUTFD" 2>/dev/null
+  echo "ui_print *  Moto Camera 4 for Moto G Stylus 5G 2023     *" > "/proc/self/fd/$OUTFD" 2>/dev/null
+  echo "ui_print ************************************************" > "/proc/self/fd/$OUTFD" 2>/dev/null
+fi
+
+install_module
+exit 0

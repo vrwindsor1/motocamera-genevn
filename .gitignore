@@ -1,0 +1,19 @@
+# Root directories containing stock ROMs and raw partitions
+/android/
+/extracted/
+/build_module/
+
+# Build artifacts and compiled outputs
+output/*.zip
+output/compiled/
+output/transplanted_images/
+*.raw.img
+*.img
+*.sparsechunk*
+
+# Temporary and editor files
+/tmp/
+*.log
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,12 @@
+allow hal_imagetuner_default hal_imagetuner_hwservice hwservice_manager { add find }
+allow hal_camera_default hal_imagetuner_hwservice hwservice_manager { find }
+allow system_app hal_imagetuner_hwservice hwservice_manager { find }
+allow platform_app hal_imagetuner_hwservice hwservice_manager { find }
+allow system_server hal_imagetuner_hwservice hwservice_manager { find }
+allow hal_cameradesktop_default hal_cameradesktop_hwservice hwservice_manager { add find }
+allow system_app hal_cameradesktop_hwservice hwservice_manager { find }
+allow platform_app hal_cameradesktop_hwservice hwservice_manager { find }
+allow system_app vendor_persist_camera_prop file { read getattr open map }
+allow platform_app vendor_persist_camera_prop file { read getattr open map }
+allow system_app vendor_camera_prop file { read getattr open map }
+allow platform_app vendor_camera_prop file { read getattr open map }
